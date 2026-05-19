@@ -40,7 +40,20 @@ defmodule ExLocation do
         operation_mode: :standalone, # :default | :msb | :msa | :standalone | :cellid | :wwan
         interval_ms: 1_000,
         autostart: true,
-        log_events: true
+        log_events: true,
+        sync_time: true              # feed GPS UTC to NervesTime if NTP hasn't synced
+
+  ## Clock synchronisation
+
+  When `sync_time: true` (default) and `nerves_time` is on the load
+  path, the first position report that carries a valid UTC timestamp
+  AND happens while `NervesTime.synchronized?/0` is `false` will be
+  used to call `NervesTime.set_system_time/1`. WiFi/Ethernet NTP wins
+  when it's available; the GPS path only fills the gap when the
+  device has booted offline.
+
+  Time is set at most once per boot from GPS — once `ntpd` takes
+  over, GPS doesn't fight it.
 
   The defaults are deliberately ModemManager-like.
   """

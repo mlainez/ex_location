@@ -56,11 +56,13 @@ defmodule ExLocation.Tracker do
       mode: Keyword.get(cfg, :operation_mode, :msb),
       interval_ms: Keyword.get(cfg, :interval_ms, 1_000),
       autostart: Keyword.get(cfg, :autostart, true),
+      sync_time: Keyword.get(cfg, :sync_time, true),
       session_id: 1,
       fsm: :idle,
       last_position: nil,
       last_satellites: [],
-      bootstrap_attempts: 0
+      bootstrap_attempts: 0,
+      time_synced_from_gps?: false
     }
 
     if state.autostart do
@@ -104,6 +106,7 @@ defmodule ExLocation.Tracker do
   @impl GenServer
   def handle_cast({:indication, %{name: :position_report} = pos}, state) do
     broadcast({:position, pos})
+    state = maybe_sync_time(state, pos)
     {:noreply, %{state | last_position: pos}}
   end
 
@@ -173,4 +176,43 @@ defmodule ExLocation.Tracker do
       for {pid, _} <- subs, do: send(pid, {ExLocation, elem(event, 0), elem(event, 1)})
     end)
   end
+
+  # Feed the GPS-derived datetime to nerves_time when:
+  #   1. The user opted in (config :ex_location, sync_time: true — default).
+  #   2. nerves_time is on the load path (no-op in plain-Elixir use).
+  #   3. nerves_time hasn't reached NTP-synced state yet (so wifi/ethernet
+  #      NTP wins automatically when available — we only fill the gap).
+  #   4. We have a real DateTime (codec returns nil for indications without
+  #      TLV 0x25, so cell-tower fallback fixes don't trigger this).
+  #   5. We haven't already pushed a GPS time this session — set once and
+  #      let ntpd take it from there.
+  defp maybe_sync_time(%{sync_time: false} = state, _pos), do: state
+  defp maybe_sync_time(%{time_synced_from_gps?: true} = state, _pos), do: state
+  defp maybe_sync_time(state, %{datetime: nil}), do: state
+
+  defp maybe_sync_time(state, %{datetime: %DateTime{} = dt}) do
+    cond do
+      not Code.ensure_loaded?(NervesTime) ->
+        state
+
+      apply(NervesTime, :synchronized?, []) ->
+        # NTP already won — leave the clock alone.
+        %{state | time_synced_from_gps?: true}
+
+      true ->
+        naive = DateTime.to_naive(dt)
+
+        case apply(NervesTime, :set_system_time, [naive]) do
+          :ok ->
+            Logger.info("[ExLocation] set system time from GPS: #{NaiveDateTime.to_iso8601(naive)}")
+            %{state | time_synced_from_gps?: true}
+
+          other ->
+            Logger.warning("[ExLocation] NervesTime.set_system_time/1 returned #{inspect(other)}")
+            state
+        end
+    end
+  end
+
+  defp maybe_sync_time(state, _pos), do: state
 end
