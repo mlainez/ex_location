@@ -20,7 +20,7 @@ defmodule ExLocation.MixProject do
 
   defp deps do
     [
-      {:qmi, github: "mlainez/qmi"}
+      {:qmi, github: "mlainez/qmi", branch: "qrtr-transport"}
     ]
   end
 end
