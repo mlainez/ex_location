@@ -20,7 +20,7 @@ defmodule ExLocation.MixProject do
 
   defp deps do
     [
-      {:qmi, path: "../qmi"}
+      {:qmi, github: "mlainez/qmi"}
     ]
   end
 end
