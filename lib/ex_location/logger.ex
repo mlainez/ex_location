@@ -4,7 +4,7 @@
 #
 defmodule ExLocation.Logger do
   @moduledoc """
-  Default subscriber that pretty-prints each fix and satellite update
+  Default subscriber that pretty-prints each position fix and satellite update
   via `Logger.info`. Disable with `config :ex_location, log_events: false`.
   """
 
@@ -26,7 +26,7 @@ defmodule ExLocation.Logger do
   end
 
   def handle_info({ExLocation, :sv_info, %{satellites: sats}}, state) do
-    used = Enum.count(sats, & &1.used_in_fix)
+    tracking = Enum.count(sats, &(&1.status == :tracking))
     seen = length(sats)
 
     by_system =
@@ -35,7 +35,7 @@ defmodule ExLocation.Logger do
       |> Enum.map(fn {sys, n} -> "#{sys}=#{n}" end)
       |> Enum.join(",")
 
-    Logger.info("[ExLocation] satellites used=#{used}/#{seen} (#{by_system})")
+    Logger.info("[ExLocation] satellites tracking=#{tracking}/#{seen} (#{by_system})")
     {:noreply, state}
   end
 
@@ -52,6 +52,7 @@ defmodule ExLocation.Logger do
       pos.heading && "hdg=#{fmt(pos.heading, 1)}°",
       pos.accuracy && "±#{fmt(pos.accuracy, 1)}m",
       pos.hdop && "hdop=#{fmt(pos.hdop, 1)}",
+      "sats=#{length(Map.get(pos, :satellites_used, []))}",
       pos.datetime && "t=#{DateTime.to_iso8601(pos.datetime)}"
     ]
     |> Enum.reject(&is_nil/1)

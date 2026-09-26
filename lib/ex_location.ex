@@ -10,14 +10,21 @@ defmodule ExLocation do
   surface — start a tracking session, choose standalone vs network
   assistance, subscribe to position + satellites-in-view updates.
 
+  Requires the `qrtr-transport` branch of the
+  [mlainez/qmi](https://github.com/mlainez/qmi) fork.
+
   ## Events
 
   Subscribers receive `{ExLocation, kind, payload}`:
 
     * `{ExLocation, :position, %{latitude, longitude, altitude_msl,
-      speed, heading, accuracy, hdop, datetime, …}}` — every fix.
-    * `{ExLocation, :sv_info, %{satellites: [%{system, sv_id, snr,
-      elevation, azimuth, used_in_fix, healthy}]}}` — satellite list.
+      speed, heading, accuracy, hdop, datetime, satellites_used, …}}` —
+      sent for each position report that carries a valid fix
+      (latitude and longitude present). Reports sent while the
+      receiver is still searching are dropped.
+    * `{ExLocation, :sv_info, %{satellites: [%{system, sv_id, status,
+      snr, elevation, azimuth, healthy}]}}` — satellites in view;
+      `status` is `:idle | :searching | :tracking`.
 
   ## Quick start
 
@@ -26,36 +33,26 @@ defmodule ExLocation do
       flush()
       # {ExLocation, :position, %{latitude: 51.50…, longitude: -0.12…, …}}
 
-  Or, single-shot:
+  Or, polling:
 
       iex> ExLocation.get_position()
       {:ok, %{latitude: …, longitude: …, datetime: …}}
 
-  By default the supervisor brings up a QMI client against the local
-  modem at boot and starts periodic 1 Hz tracking in `:msb`
-  (Mobile-Station-Based AGPS — best fix speed when cellular data is
-  available). Tune via config:
-
-      config :ex_location,
-        operation_mode: :standalone, # :default | :msb | :msa | :standalone | :cellid | :wwan
-        interval_ms: 1_000,
-        autostart: true,
-        log_events: true,
-        sync_time: true              # feed GPS UTC to NervesTime if NTP hasn't synced
+  By default the application starts a QMI client (QRTR transport) at
+  boot and, about 1.5 s later, tries to start periodic 1 Hz tracking in
+  `:msb` (Mobile-Station-Based AGPS). The LOC service only appears once
+  the modem firmware (MPSS) is running, so the tracker retries with
+  exponential backoff (1 s doubling up to 30 s) until it does. See the
+  README for all configuration keys.
 
   ## Clock synchronisation
 
   When `sync_time: true` (default) and `nerves_time` is on the load
-  path, the first position report that carries a valid UTC timestamp
-  AND happens while `NervesTime.synchronized?/0` is `false` will be
-  used to call `NervesTime.set_system_time/1`. WiFi/Ethernet NTP wins
-  when it's available; the GPS path only fills the gap when the
-  device has booted offline.
-
-  Time is set at most once per boot from GPS — once `ntpd` takes
-  over, GPS doesn't fight it.
-
-  The defaults are deliberately ModemManager-like.
+  path, the first valid fix that carries a UTC timestamp while
+  `NervesTime.synchronized?/0` is `false` is used to call
+  `NervesTime.set_system_time/1`. WiFi/Ethernet NTP wins when it's
+  available; the GPS path only fills the gap when the device has
+  booted offline. Time is set at most once per boot from GPS.
   """
 
   @doc """
@@ -96,15 +93,27 @@ defmodule ExLocation do
   @spec satellites() :: [map()]
   defdelegate satellites(), to: ExLocation.Tracker
 
-  @doc "Change the LOC operation mode (`:default | :msb | :msa | :standalone | :cellid | :wwan`)."
+  @doc """
+  Change the LOC operation mode (`:default | :msb | :msa | :standalone |
+  :cellid | :wwan`). If tracking hasn't started yet, the mode is stored
+  and used when it does.
+  """
   @spec set_mode(QMI.Codec.LOC.operation_mode()) :: :ok | {:error, term()}
   defdelegate set_mode(mode), to: ExLocation.Tracker
 
-  @doc "Change the minimum interval (ms) between position reports. Restarts the session."
+  @doc """
+  Change the minimum interval (ms) between position reports. Restarts
+  the session if tracking; otherwise stored for when tracking starts.
+  """
   @spec set_interval(pos_integer()) :: :ok | {:error, term()}
   defdelegate set_interval(ms), to: ExLocation.Tracker
 
-  @doc "Start tracking explicitly (no-op if already running)."
+  @doc """
+  Start tracking now (no-op if already running). Not needed with
+  `autostart: true` (the default); useful after `stop_tracking/0` or
+  with `autostart: false`. Returns `{:error, reason}` if the LOC
+  service isn't available yet.
+  """
   @spec start_tracking() :: :ok | {:error, term()}
   defdelegate start_tracking(), to: ExLocation.Tracker
 

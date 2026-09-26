@@ -11,13 +11,21 @@ defmodule ExLocation.Application do
   def start(_type, _args) do
     log_events? = Application.get_env(:ex_location, :log_events, true)
 
+    qmi_opts =
+      [
+        name: ExLocation.QMI,
+        transport: Application.get_env(:ex_location, :transport, :qrtr),
+        indication_callback: &ExLocation.Tracker.handle_indication/1
+      ] ++
+        case Application.get_env(:ex_location, :device_path) do
+          nil -> []
+          path -> [device_path: path]
+        end
+
     children =
       [
         {Registry, keys: :duplicate, name: ExLocation.Registry},
-        {QMI.Supervisor,
-         name: ExLocation.QMI,
-         transport: Application.get_env(:ex_location, :transport, :qrtr),
-         indication_callback: &ExLocation.Tracker.handle_indication/1},
+        {QMI.Supervisor, qmi_opts},
         ExLocation.Tracker
       ] ++ if(log_events?, do: [ExLocation.Logger], else: [])
 
