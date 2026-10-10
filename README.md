@@ -1,9 +1,5 @@
 # ex_location
 
-> ### ⚠️ Very early work — built for a workshop, not for production
->
-> Written for the **Goatmire Elixir workshop** on running Nerves on Fairphone 3 hardware. There are no stability guarantees and APIs will change without notice.
-
 GPS / GNSS location for Qualcomm modems via the QMI **LOC** service.
 
 Mirrors ModemManager's `org.freedesktop.ModemManager1.Modem.Location`
